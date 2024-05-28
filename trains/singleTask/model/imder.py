@@ -112,7 +112,6 @@ class IMDER(nn.Module):
         self.cat_lv = nn.Conv1d(self.d_l * 2, self.d_l, kernel_size=1, padding=0)
         self.cat_la = nn.Conv1d(self.d_l * 2, self.d_l, kernel_size=1, padding=0)
         self.cat_va = nn.Conv1d(self.d_l * 2, self.d_l, kernel_size=1, padding=0)
-
         self.rec_l = nn.Sequential(
             nn.Conv1d(self.d_l, self.d_l * 2, 1),
             Group(num_channels=self.d_l * 2, num_blocks=20, reduction=16),
