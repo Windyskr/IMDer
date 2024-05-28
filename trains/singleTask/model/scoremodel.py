@@ -43,9 +43,13 @@ class ScoreNet(nn.Module):
         """
         super().__init__()
         # Gaussian random feature embedding layer for time
+        # 高斯随机特征嵌入时间步
+        # 将时间步 t 编码为高斯随机特征嵌入，以引入时间依赖性。
         self.embed = nn.Sequential(GaussianFourierProjection(embed_dim=embed_dim),
                                    nn.Linear(embed_dim, embed_dim))
         # Encoding layers where the temporal resolution decreases
+        # 提取输入特征，并结合跨模态注意力机制捕捉特征间的依赖关系。
+        # 卷积层提取局部特征，注意力机制捕捉全局依赖，结合时间嵌入进行特征融合，归一化层提升训练稳定性。
         self.conv1 = nn.Conv1d(32, channels[0], 3, stride=1, padding=1, bias=False)
         self.attention_1 = TransformerEncoder(embed_dim=channels[0],
                                               num_heads=8,
@@ -81,6 +85,8 @@ class ScoreNet(nn.Module):
                                               attn_mask=True)
         self.dense3 = Dense(embed_dim, channels[2])
         self.gnorm3 = nn.GroupNorm(32, num_channels=channels[2])
+        # 逐步恢复原始分辨率，同时结合跨模态注意力机制融合条件信息。
+        # 反卷积层恢复特征分辨率，注意力机制结合条件信息，结合时间嵌入进行特征融合，归一化层确保输出稳定性。
         self.conv4 = nn.Conv1d(channels[2], channels[3], 3, stride=2, padding=1, bias=False)
         self.conv4_cond = nn.Conv1d(channels[2], channels[3], 3, stride=2, padding=1, bias=False)
         self.attention_4 = TransformerEncoder(embed_dim=channels[3],
@@ -96,31 +102,36 @@ class ScoreNet(nn.Module):
 
         # Decoding layers where the temporal resolution increases
         self.tconv4 = nn.ConvTranspose1d(channels[3], channels[2], 3, stride=2, padding=1, bias=False, output_padding=1)
-        self.tconv4_cond = nn.ConvTranspose1d(channels[3], channels[2], 3, stride=2, padding=1, bias=False, output_padding=1)
+        self.tconv4_cond = nn.ConvTranspose1d(channels[3], channels[2], 3, stride=2, padding=1, bias=False,
+                                              output_padding=1)
         self.attention_t4 = TransformerEncoder(embed_dim=channels[2],
-                                              num_heads=8,
-                                              layers=2,
-                                              attn_dropout=0.0,
-                                              relu_dropout=0.0,
-                                              res_dropout=0.0,
-                                              embed_dropout=0.0,
-                                              attn_mask=True)
+                                               num_heads=8,
+                                               layers=2,
+                                               attn_dropout=0.0,
+                                               relu_dropout=0.0,
+                                               res_dropout=0.0,
+                                               embed_dropout=0.0,
+                                               attn_mask=True)
         self.dense5 = Dense(embed_dim, channels[2])
         self.tgnorm4 = nn.GroupNorm(32, num_channels=channels[2])
-        self.tconv3 = nn.ConvTranspose1d(channels[2] + channels[2], channels[1], 3, stride=2, padding=1, bias=False, output_padding=1)
-        self.tconv3_cond = nn.ConvTranspose1d(channels[2], channels[1], 3, stride=2, padding=1, bias=False, output_padding=1)
+        self.tconv3 = nn.ConvTranspose1d(channels[2] + channels[2], channels[1], 3, stride=2, padding=1, bias=False,
+                                         output_padding=1)
+        self.tconv3_cond = nn.ConvTranspose1d(channels[2], channels[1], 3, stride=2, padding=1, bias=False,
+                                              output_padding=1)
         self.attention_t3 = TransformerEncoder(embed_dim=channels[1],
-                                              num_heads=8,
-                                              layers=2,
-                                              attn_dropout=0.0,
-                                              relu_dropout=0.0,
-                                              res_dropout=0.0,
-                                              embed_dropout=0.0,
-                                              attn_mask=True)
+                                               num_heads=8,
+                                               layers=2,
+                                               attn_dropout=0.0,
+                                               relu_dropout=0.0,
+                                               res_dropout=0.0,
+                                               embed_dropout=0.0,
+                                               attn_mask=True)
         self.dense6 = Dense(embed_dim, channels[1])
         self.tgnorm3 = nn.GroupNorm(32, num_channels=channels[1])
-        self.tconv2 = nn.ConvTranspose1d(channels[1] + channels[1], channels[0], 3, stride=2, padding=1, bias=False, output_padding=1)
-        self.tconv2_cond = nn.ConvTranspose1d(channels[1], channels[0], 3, stride=2, padding=1, bias=False, output_padding=1)
+        self.tconv2 = nn.ConvTranspose1d(channels[1] + channels[1], channels[0], 3, stride=2, padding=1, bias=False,
+                                         output_padding=1)
+        self.tconv2_cond = nn.ConvTranspose1d(channels[1], channels[0], 3, stride=2, padding=1, bias=False,
+                                              output_padding=1)
         self.attention_t2 = TransformerEncoder(embed_dim=channels[0],
                                                num_heads=8,
                                                layers=2,
@@ -220,8 +231,9 @@ class ScoreNet(nn.Module):
         h = h / self.marginal_prob_std(t)[:, None, None]
         return h
 
+
 def loss_fn(model, x, marginal_prob_std, condition=None, eps=1e-5):
-  """The loss function for training score-based generative models.
+    """The loss function for training score-based generative models.
 
   Args:
     model: A PyTorch model instance that represents a
@@ -231,22 +243,39 @@ def loss_fn(model, x, marginal_prob_std, condition=None, eps=1e-5):
       the perturbation kernel.
     eps: A tolerance value for numerical stability.
   """
-  random_t = torch.rand(x.shape[0], device=x.device) * (1. - eps) + eps
-  z = torch.randn_like(x)
-  std = marginal_prob_std(random_t)
-  perturbed_x = x + z * std[:, None, None]
-  if condition is not None:
-    perturbed_condition = condition + z * std[:, None, None]
-    score = model(perturbed_x, random_t, perturbed_condition)
-  else:
-    score = model(perturbed_x, random_t)
-  loss = torch.mean(torch.sum((score * std[:, None, None] + z)**2, dim=(1,2)))
-  return loss
+    # 随机时间步 t 和噪声 z
+    # 生成一个随机时间步 random_t 和与输入数据形状相同的噪声 z。
+    random_t = torch.rand(x.shape[0], device=x.device) * (1. - eps) + eps
+    z = torch.randn_like(x)
+    # 计算给定时间步 random_t 的边际概率标准差 std。
+    # marginal_prob_std 是一个函数，返回时间步 random_t 对应的标准差。这个标准差用于模拟数据在扩散过程中的噪声水平。
+    std = marginal_prob_std(random_t)
+    # 生成带有噪声的扰动数据 perturbed_x
+    # 将噪声 z 按 std 缩放后加到输入数据 x 上，生成扰动数据 perturbed_x。
+    # 这个过程模拟了数据在扩散过程中的变化
+    perturbed_x = x + z * std[:, None, None]
+    # 通过 ScoreNet 模型计算扰动数据的评分 score。
+    if condition is not None:
+        # 如果有条件输入 condition，则对条件数据也进行同样的扰动，生成 perturbed_condition。
+        # ScoreNet 接受扰动数据 perturbed_x、时间步 random_t
+        # 和扰动条件 perturbed_condition 作为输入，输出评分 score。
+        perturbed_condition = condition + z * std[:, None, None]
+        score = model(perturbed_x, random_t, perturbed_condition)
+    else:
+        # 如果没有条件输入，则直接用 perturbed_x 和 random_t 计算评分。
+        score = model(perturbed_x, random_t)
+    # 计算评分损失，用于指导模型优化。
+    # score * std[:, None, None] 是对噪声的估计，加上真实噪声 z 后，计算其平方和，再对每个样本求和。
+    # 通过 torch.mean 对所有样本的损失进行平均，得到最终的评分损失。
+    loss = torch.mean(torch.sum((score * std[:, None, None] + z) ** 2, dim=(1, 2)))
+    return loss
 
 
-#Define the Euler-Maruyama sampler
+# Define the Euler-Maruyama sampler
 ## The number of sampling steps.
 num_steps = 100
+
+
 def Euler_Maruyama_sampler(score_model,
                            marginal_prob_std,
                            diffusion_coeff,
@@ -282,7 +311,8 @@ def Euler_Maruyama_sampler(score_model,
             batch_time_step = torch.ones(batch_size, device=device) * time_step
             g = diffusion_coeff(batch_time_step)  # batch_time_step = t
             if condition is not None:
-                perturbed_condition = condition + torch.randn(batch_size, 32, 48, device=device) * marginal_prob_std(batch_time_step)[:, None, None]
+                perturbed_condition = condition + torch.randn(batch_size, 32, 48, device=device) * marginal_prob_std(
+                    batch_time_step)[:, None, None]
                 mean_x = x + (g ** 2)[:, None, None] * score_model(x, batch_time_step, perturbed_condition) * step_size
             else:
                 mean_x = x + (g ** 2)[:, None, None] * score_model(x, batch_time_step) * step_size

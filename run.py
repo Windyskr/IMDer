@@ -87,6 +87,7 @@ def IMDER_run(
     for i, seed in enumerate(seeds):
         setup_seed(seed)
         args['cur_seed'] = i + 1
+        # 调用run函数开始训练
         result = _run(args, num_workers, is_tune)
         model_results.append(result)
 

@@ -19,6 +19,7 @@ class MMDataset(Dataset):
     def __init_mosi(self):
         with open(self.args['featurePath'], 'rb') as f:
             data = pickle.load(f)
+        # 加载数据：根据 args 中的路径加载数据，并根据 use_bert 参数选择使用 BERT 特征或文本特征。
         if 'use_bert' in self.args and self.args['use_bert']:
             self.text = data[self.mode]['text_bert'].astype(np.float32)
         else:
@@ -27,7 +28,8 @@ class MMDataset(Dataset):
         self.audio = data[self.mode]['audio'].astype(np.float32)
         self.raw_text = data[self.mode]['raw_text']
         self.ids = data[self.mode]['id']
-
+        # 特征覆盖：如果提供了新的特征路径（feature_T, feature_A, feature_V），则使用新的特征覆盖原始特征。
+        # 文本特征
         if self.args['feature_T'] != "":
             with open(self.args['feature_T'], 'rb') as f:
                 data_T = pickle.load(f)
@@ -37,25 +39,29 @@ class MMDataset(Dataset):
             else:
                 self.text = data_T[self.mode]['text'].astype(np.float32)
                 self.args['feature_dims'][0] = self.text.shape[2]
+        # 音频特征
         if self.args['feature_A'] != "":
             with open(self.args['feature_A'], 'rb') as f:
                 data_A = pickle.load(f)
             self.audio = data_A[self.mode]['audio'].astype(np.float32)
             self.args['feature_dims'][1] = self.audio.shape[2]
+        # 视觉特征
         if self.args['feature_V'] != "":
             with open(self.args['feature_V'], 'rb') as f:
                 data_V = pickle.load(f)
             self.vision = data_V[self.mode]['vision'].astype(np.float32)
             self.args['feature_dims'][2] = self.vision.shape[2]
-
+        # 加载标签
+        # regression_labels：这是一个包含回归标签的数组，通常是情感得分，范围在-3到3之间。
         self.labels = {
             'M': np.array(data[self.mode]['regression_labels']).astype(np.float32)
         }
 
         logger.info(f"{self.mode} samples: {self.labels['M'].shape}")
-
+        # 标签和对齐信息：加载回归标签和对齐信息，如果需要，还会对特征进行归一化处理。
         if not self.args['need_data_aligned']:
             if self.args['feature_A'] != "":
+                # 从新的特征文件中加载长度信息
                 self.audio_lengths = list(data_A[self.mode]['audio_lengths'])
             else:
                 self.audio_lengths = data[self.mode]['audio_lengths']
@@ -97,6 +103,8 @@ class MMDataset(Dataset):
         self.text = do_truncate(self.text, text_length)
         self.audio = do_truncate(self.audio, audio_length)
 
+    # 归一化：对特征进行归一化处理。
+    # 消除不同模态数据的量纲差异，加速模型的收敛，提高训练的稳定性和性能。
     def __normalize(self):
         self.vision = np.transpose(self.vision, (1, 0, 2))
         self.audio = np.transpose(self.audio, (1, 0, 2))

@@ -6,7 +6,9 @@ from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 from ..utils import MetricsTop, dict_to_str
+
 logger = logging.getLogger('MMSA')
+
 
 class IMDER():
     def __init__(self, args):
@@ -36,7 +38,7 @@ class IMDER():
             k = k.replace('Model.', '')
             new_state_dict[k] = v
         net_dict.update(new_state_dict)
-        model.load_state_dict(net_dict)
+        model.load_state_dict(net_dict, strict=False)
 
         while True:
             epochs += 1
@@ -63,10 +65,12 @@ class IMDER():
                     # forward
                     miss_2 = [0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
                     miss_1 = [0.1, 0.2, 0.3, 0.2, 0.1, 0.0, 0.0]
-                    if miss_two / (np.round(len(dataloader['train']) / 10) * 10) < miss_2[int(self.args.mr*10-1)]:  # missing two modal
+                    if miss_two / (np.round(len(dataloader['train']) / 10) * 10) < miss_2[
+                        int(self.args.mr * 10 - 1)]:  # missing two modal
                         outputs = model(text, audio, vision, num_modal=1)
                         miss_two += 1
-                    elif miss_one / (np.round(len(dataloader['train']) / 10) * 10) < miss_1[int(self.args.mr*10-1)]:  # missing one modal
+                    elif miss_one / (np.round(len(dataloader['train']) / 10) * 10) < miss_1[
+                        int(self.args.mr * 10 - 1)]:  # missing one modal
                         outputs = model(text, audio, vision, num_modal=2)
                         miss_one += 1
                     else:  # no missing
@@ -78,6 +82,7 @@ class IMDER():
                     loss_score_v = outputs['loss_score_v']
                     loss_score_a = outputs['loss_score_a']
                     loss_rec = outputs['loss_rec']
+                    # 公式（20）
                     combine_loss = task_loss + 0.1 * (loss_score_l + loss_score_v + loss_score_a + loss_rec)
 
                     # backward
@@ -158,10 +163,12 @@ class IMDER():
                         labels = labels.view(-1, 1)
                     miss_2 = [0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
                     miss_1 = [0.1, 0.2, 0.3, 0.2, 0.1, 0.0, 0.0]
-                    if miss_two / (np.round(len(dataloader) / 10) * 10) < miss_2[int(self.args.mr * 10 - 1)]:  # missing two modal
+                    if miss_two / (np.round(len(dataloader) / 10) * 10) < miss_2[
+                        int(self.args.mr * 10 - 1)]:  # missing two modal
                         outputs = model(text, audio, vision, num_modal=1)
                         miss_two += 1
-                    elif miss_one / (np.round(len(dataloader) / 10) * 10) < miss_1[int(self.args.mr * 10 - 1)]:  # missing one modal
+                    elif miss_one / (np.round(len(dataloader) / 10) * 10) < miss_1[
+                        int(self.args.mr * 10 - 1)]:  # missing one modal
                         outputs = model(text, audio, vision, num_modal=2)
                         miss_one += 1
                     else:  # no missing
