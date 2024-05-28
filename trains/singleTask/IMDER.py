@@ -22,18 +22,15 @@ class IMDER():
     def fine_tune(self,
                   blend_interval=None,  # None to disable, set (0,1) for always blend, (0.2,0.8) for blending during 80%->20%
                   skip_interval=None):  #: None to disable. [0.8,1] means skip sampling during 0.8T~T
-        # load pretrained Trained model
         self.blend_interval = blend_interval
         self.skip_interval = skip_interval
-        # TO-DO: generate blend mask like model's shape
-        self.blend_mask = generate_blend_mask((self.args.batch_size, 3, 224, 224), blend_interval)  # 示例形状
         trained_model = torch.load('pt/trained-{}.pth'.format(self.args.dataset_name))
-
 
     def do_train(self, model, dataloader, return_epoch_results=False):
         optimizer = optim.Adam(model.parameters(), lr=self.args.learning_rate)
         scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, verbose=True, patience=self.args.patience)
         epochs, best_epoch = 0, 0
+        current_epoch = 0  # 新增的变量
         if return_epoch_results:
             epoch_results = {'train': [], 'valid': [], 'test': []}
         min_or_max = 'min' if self.args.KeyEval in ['Loss'] else 'max'
@@ -49,14 +46,17 @@ class IMDER():
         model.load_state_dict(net_dict, strict=False)
 
         while True:
-            epochs += 1
+            current_epoch += 1  # 更新当前epoch
             y_pred, y_true = [], []
             losses = []
             model.train()
             train_loss = 0.0
             left_epochs = self.args.update_epochs
+            miss_one, miss_two = 0, 0  # num of missing one modal and missing two modal
             with tqdm(dataloader['train']) as td:
                 for batch_data in td:
+                    if self.blend_mask is None:
+                        self.blend_mask = generate_blend_mask(batch_data['vision'].shape)
                     if left_epochs == self.args.update_epochs:
                         optimizer.zero_grad()
                     left_epochs -= 1
@@ -68,10 +68,23 @@ class IMDER():
                         labels = labels.view(-1).long()
                     else:
                         labels = labels.view(-1, 1)
+                        # forward
+                        miss_2 = [0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
+                        miss_1 = [0.1, 0.2, 0.3, 0.2, 0.1, 0.0, 0.0]
+                        if miss_two / (np.round(len(dataloader['train']) / 10) * 10) < miss_2[
+                            int(self.args.mr * 10 - 1)]:  # missing two modal
+                            outputs = model(text, audio, vision, num_modal=1)
+                            miss_two += 1
+                        elif miss_one / (np.round(len(dataloader['train']) / 10) * 10) < miss_1[
+                            int(self.args.mr * 10 - 1)]:  # missing one modal
+                            outputs = model(text, audio, vision, num_modal=2)
+                            miss_one += 1
+                        else:  # no missing
+                            outputs = model(text, audio, vision, num_modal=3)
 
                     # Blend logic
                     if self.blend_interval:
-                        step_ratio = epochs / self.args.num_epochs
+                        step_ratio = current_epoch / self.args.num_epochs  # 使用current_epoch计算step_ratio
                         if self.blend_interval[0] <= step_ratio <= self.blend_interval[1]:
                             vision = self.blend(vision, self.blend_mask)
 
@@ -96,39 +109,40 @@ class IMDER():
                 if not left_epochs:
                     optimizer.step()
             train_loss = train_loss / len(dataloader['train'])
+
             pred, true = torch.cat(y_pred), torch.cat(y_true)
             train_results = self.metrics(pred, true)
             logger.info(
-                f"TRAIN-({self.args.model_name}) [{epochs - best_epoch}/{epochs}/{self.args.cur_seed}] "
+                f"TRAIN-({self.args.model_name}) [{current_epoch - best_epoch}/{current_epoch}/{self.args.cur_seed}] "
                 f">> loss: {round(train_loss, 4)} "
                 f"{dict_to_str(train_results)}"
             )
-            val_results = self.do_test(model, dataloader['valid'], mode="VAL")
-            test_results = self.do_test(model, dataloader['test'], mode="TEST")
+            val_results = self.do_test(model, dataloader['valid'], mode="VAL", current_epoch=current_epoch)
+            test_results = self.do_test(model, dataloader['test'], mode="TEST", current_epoch=current_epoch)
             cur_valid = val_results[self.args.KeyEval]
             scheduler.step(val_results['Loss'])
-            model_save_path = 'pt/' + str(epochs) + '.pth'
+            model_save_path = 'pt/' + str(current_epoch) + '.pth'
             torch.save(model.state_dict(), model_save_path)
             isBetter = cur_valid <= (best_valid - 1e-6) if min_or_max == 'min' else cur_valid >= (best_valid + 1e-6)
             if isBetter:
-                best_valid, best_epoch = cur_valid, epochs
+                best_valid, best_epoch = cur_valid, current_epoch
                 torch.save(model.cpu().state_dict(), self.args.model_save_path)
                 model.to(self.args.device)
             if return_epoch_results:
                 train_results["Loss"] = train_loss
                 epoch_results['train'].append(train_results)
                 epoch_results['valid'].append(val_results)
-                test_results = self.do_test(model, dataloader['test'], mode="TEST")
                 epoch_results['test'].append(test_results)
-            if epochs - best_epoch >= self.args.early_stop:
+            if current_epoch - best_epoch >= self.args.early_stop:
                 return epoch_results if return_epoch_results else None
 
     def blend(self, vision, mask):
         return vision * mask
 
-    def do_test(self, model, dataloader, mode="VAL", return_sample_results=False):
+    def do_test(self, model, dataloader, mode="VAL", current_epoch=0, return_sample_results=False):
         model.eval()
         y_pred, y_true = [], []
+        miss_one, miss_two = 0, 0
         eval_loss = 0.0
         if return_sample_results:
             ids, sample_results = [], []
@@ -142,6 +156,8 @@ class IMDER():
         with torch.no_grad():
             with tqdm(dataloader) as td:
                 for batch_data in td:
+                    if self.blend_mask is None:
+                        self.blend_mask = generate_blend_mask(batch_data['vision'].shape)
                     vision = batch_data['vision'].to(self.args.device)
                     audio = batch_data['audio'].to(self.args.device)
                     text = batch_data['text'].to(self.args.device)
@@ -150,10 +166,21 @@ class IMDER():
                         labels = labels.view(-1).long()
                     else:
                         labels = labels.view(-1, 1)
-
+                    miss_2 = [0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
+                    miss_1 = [0.1, 0.2, 0.3, 0.2, 0.1, 0.0, 0.0]
+                    if miss_two / (np.round(len(dataloader) / 10) * 10) < miss_2[
+                        int(self.args.mr * 10 - 1)]:  # missing two modal
+                        outputs = model(text, audio, vision, num_modal=1)
+                        miss_two += 1
+                    elif miss_one / (np.round(len(dataloader) / 10) * 10) < miss_1[
+                        int(self.args.mr * 10 - 1)]:  # missing one modal
+                        outputs = model(text, audio, vision, num_modal=2)
+                        miss_one += 1
+                    else:  # no missing
+                        outputs = model(text, audio, vision, num_modal=3)
                     # Blend logic
                     if self.blend_interval:
-                        step_ratio = epochs / self.args.num_epochs
+                        step_ratio = current_epoch / self.args.num_epochs  # 使用current_epoch计算step_ratio
                         if self.blend_interval[0] <= step_ratio <= self.blend_interval[1]:
                             vision = self.blend(vision, self.blend_mask)
 
