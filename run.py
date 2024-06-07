@@ -45,7 +45,9 @@ def IMDER_run(
         model_name, dataset_name, config=None, config_file="", seeds=[], mr=0.1, is_tune=False,
         tune_times=500, feature_T="", feature_A="", feature_V="",
         model_save_dir="./pt", res_save_dir="./result", log_dir="./log",
-        gpu_ids=[0], num_workers=4, verbose_level=1, mode='train'
+        gpu_ids=[0], num_workers=4, verbose_level=1, mode='train',
+        unet_config_l=None, unet_config_v=None, unet_config_a=None,
+        ckpt_path_l=None, ckpt_path_v=None, ckpt_path_a=None
 ):
     # Initialization
     model_name = model_name.lower()
@@ -81,6 +83,14 @@ def IMDER_run(
     if config:
         args.update(config)
 
+    # 添加 unet 和 ckpt 配置到 args
+    args['unet_config_l'] = unet_config_l
+    args['unet_config_v'] = unet_config_v
+    args['unet_config_a'] = unet_config_a
+    args['ckpt_path_l'] = ckpt_path_l
+    args['ckpt_path_v'] = ckpt_path_v
+    args['ckpt_path_a'] = ckpt_path_a
+
     res_save_dir = Path(res_save_dir) / "normal"
     res_save_dir.mkdir(parents=True, exist_ok=True)
     model_results = []
@@ -110,16 +120,24 @@ def IMDER_run(
     logger.info(f"Results saved to {csv_file}.")
 
 
-def _run(args, num_workers=4, is_tune=False, from_sena=False):
-    dataloader = MMDataLoader(args, num_workers)
 
-    model = getattr(imder, 'IMDER')(args)
+def _run(args, num_workers, is_tune):
+    model = getattr(imder, 'IMDER')(
+        args,
+        args['unet_config_l'],
+        args['unet_config_v'],
+        args['unet_config_a'],
+        args['ckpt_path_l'],
+        args['ckpt_path_v'],
+        args['ckpt_path_a']
+    )
+    dataloader = MMDataLoader(args, num_workers)
     model = model.cuda()
 
     trainer = ATIO().getTrain(args)
 
-    epoch_results = trainer.do_train(model, dataloader, return_epoch_results=from_sena)
-    model.load_state_dict(torch.load('pt/imder-{}.pth'.format(args.dataset_name)))
+    epoch_results = trainer.do_train(model, dataloader, return_epoch_results=True)
+    model.load_state_dict(torch.load(args['model_save_path']))
 
     results = trainer.do_test(model, dataloader['test'], mode="TEST")
 
