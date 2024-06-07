@@ -38,18 +38,10 @@ default_unet_config = {
     'legacy': True
 }
 
-# 虚拟检查点路径
-ckpt_path_l = 'ckpt_path_l.pth'
-ckpt_path_v = 'ckpt_path_v.pth'
-ckpt_path_a = 'ckpt_path_a.pth'
-
 IMDER_run(model_name='imder',
           dataset_name='mosi',
           seeds=[1111, 1112, 1113, 1114, 1115, 1116, 1117, 1118, 1119],
           mr=0.1,
           unet_config_l=default_unet_config,
           unet_config_v=default_unet_config,
-          unet_config_a=default_unet_config,
-          ckpt_path_l=ckpt_path_l,
-          ckpt_path_v=ckpt_path_v,
-          ckpt_path_a=ckpt_path_a)
+          unet_config_a=default_unet_config)

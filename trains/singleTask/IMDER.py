@@ -11,7 +11,7 @@ logger = logging.getLogger('MMSA')
 
 
 class IMDER():
-    def __init__(self, args, unet_config_l, unet_config_v, unet_config_a, ckpt_path_l, ckpt_path_v, ckpt_path_a):
+    def __init__(self, args, unet_config_l, unet_config_v, unet_config_a):
         self.args = args
         self.criterion = nn.L1Loss() if args.train_mode == 'regression' else nn.CrossEntropyLoss()
         self.metrics = MetricsTop(args.train_mode).getMetics(args.dataset_name)
@@ -19,15 +19,10 @@ class IMDER():
         self.skip_interval = None
         self.blend_mask = None
 
-        # 初始化DDPM模型
+        # 初始化三个DDPM模型
         self.ddpm_l = ddpm.DDPM(unet_config=unet_config_l, timesteps=1000)
         self.ddpm_v = ddpm.DDPM(unet_config=unet_config_v, timesteps=1000)
         self.ddpm_a = ddpm.DDPM(unet_config=unet_config_a, timesteps=1000)
-
-        # 加载预训练模型权重
-        self.ddpm_l.init_from_ckpt(ckpt_path_l)
-        self.ddpm_v.init_from_ckpt(ckpt_path_v)
-        self.ddpm_a.init_from_ckpt(ckpt_path_a)
 
     def fine_tune(self,
                   blend_interval=None,  # None to disable, set (0,1) for always blend, (0.2,0.8) for blending during 80%->20%
@@ -47,15 +42,6 @@ class IMDER():
             epoch_results = {'train': [], 'valid': [], 'test': []}
         min_or_max = 'min' if self.args.KeyEval in ['Loss'] else 'max'
         best_valid = 1e8 if min_or_max == 'min' else 0
-
-        origin_model = torch.load('pt/pretrained-{}.pth'.format(self.args.dataset_name))
-        net_dict = model.state_dict()
-        new_state_dict = {}
-        for k, v in origin_model.items():
-            k = k.replace('Model.', '')
-            new_state_dict[k] = v
-        net_dict.update(new_state_dict)
-        model.load_state_dict(net_dict, strict=False)
 
         while True:
             current_epoch += 1  # 更新当前epoch
@@ -99,9 +85,11 @@ class IMDER():
                             vision = self.blend(vision, blend_mask)
 
                     task_loss = self.criterion(outputs['M'], labels)
-                    loss_score_l = outputs['loss_score_l']
-                    loss_score_v = outputs['loss_score_v']
-                    loss_score_a = outputs['loss_score_a']
+                    # 调用每个DDPM对象的training_step方法
+                    loss_score_l, loss_dict_l = self.ddpm_l.training_step({'text': text}, batch_idx)
+                    loss_score_v, loss_dict_v = self.ddpm_v.training_step({'audio': audio}, batch_idx)
+                    loss_score_a, loss_dict_a = self.ddpm_a.training_step({'vision': vision}, batch_idx)
+
                     loss_rec = outputs['loss_rec']
                     combine_loss = task_loss + 0.1 * (loss_score_l + loss_score_v + loss_score_a + loss_rec)
 
@@ -177,18 +165,13 @@ class IMDER():
                     miss_2 = [0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
                     miss_1 = [0.1, 0.2, 0.3, 0.2, 0.1, 0.0, 0.0]
                     if miss_two / (np.round(len(dataloader) / 10) * 10) < miss_2[int(self.args.mr * 10 - 1)]:  # missing two modal
-                        outputs = model(text, audio, vision, num_modal=1)
+                        loss_score_l, loss_score_v, loss_score_a = model(text, audio, vision, num_modal=1)
                         miss_two += 1
                     elif miss_one / (np.round(len(dataloader) / 10) * 10) < miss_1[int(self.args.mr * 10 - 1)]:  # missing one modal
-                        outputs = model(text, audio, vision, num_modal=2)
+                        loss_score_l, loss_score_v, loss_score_a = model(text, audio, vision, num_modal=2)
                         miss_one += 1
                     else:  # no missing
-                        outputs = model(text, audio, vision, num_modal=3)
-                    # Blend logic
-                    if self.blend_mask is not None:
-                        step_ratio = current_epoch / self.args.num_epochs  # 使用current_epoch计算step_ratio
-                        if self.blend_interval[0] <= step_ratio <= self.blend_interval[1]:
-                            vision = self.blend(vision, self.blend_mask)
+                        loss_score_l, loss_score_v, loss_score_a = model(text, audio, vision, num_modal=3)
 
                     if return_sample_results:
                         ids.extend(batch_data['id'])
@@ -198,9 +181,9 @@ class IMDER():
                         preds = outputs["M"].cpu().detach().numpy()
                         sample_results.extend(preds.squeeze())
 
-                    loss = self.criterion(outputs['M'], labels)
+                    loss = self.criterion(loss_score_l, labels)
                     eval_loss += loss.item()
-                    y_pred.append(outputs['M'].cpu())
+                    y_pred.append(loss_score_l.cpu())
                     y_true.append(labels.cpu())
         eval_loss = eval_loss / len(dataloader)
         pred, true = torch.cat(y_pred), torch.cat(y_true)

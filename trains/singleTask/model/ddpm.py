@@ -350,13 +350,20 @@ class DDPM(pl.LightningModule):
 
     def get_input(self, batch, k):
         x = batch[k]
+        print(f"get_input - batch[{k}] shape: {x.shape}")
         if len(x.shape) == 3:
-            x = x[..., None]
-        # x = rearrange(x, 'b h w c -> b c h w')
-        # x = x.to(memory_format=torch.contiguous_format).float()
+            # 如果维度是 (batch_size, seq_len, feature_dim)，增加一个维度变成 (batch_size, seq_len, feature_dim, 1)
+            x = x.unsqueeze(-1)
+            print(f"get_input - unsqueezed x shape: {x.shape}")
+        elif len(x.shape) == 4:
+            # 如果维度已经是 (batch_size, seq_len, feature_dim, 1)，直接返回
+            print(f"get_input - x already has 4 dimensions: {x.shape}")
+        else:
+            raise ValueError(f"Unexpected tensor shape: {x.shape}")
         return x
 
     def shared_step(self, batch):
+        print("shared_step - batch keys:", batch.keys())
         x = self.get_input(batch, self.first_stage_key)
         loss, loss_dict = self(x)
         return loss, loss_dict

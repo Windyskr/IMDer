@@ -46,9 +46,7 @@ def IMDER_run(
         tune_times=500, feature_T="", feature_A="", feature_V="",
         model_save_dir="./pt", res_save_dir="./result", log_dir="./log",
         gpu_ids=[0], num_workers=4, verbose_level=1, mode='train',
-        unet_config_l=None, unet_config_v=None, unet_config_a=None,
-        ckpt_path_l=None, ckpt_path_v=None, ckpt_path_a=None
-):
+        unet_config_l=None, unet_config_v=None, unet_config_a=None):
     # Initialization
     model_name = model_name.lower()
     dataset_name = dataset_name.lower()
@@ -83,13 +81,10 @@ def IMDER_run(
     if config:
         args.update(config)
 
-    # 添加 unet 和 ckpt 配置到 args
+    # 添加 unet 配置到 args
     args['unet_config_l'] = unet_config_l
     args['unet_config_v'] = unet_config_v
     args['unet_config_a'] = unet_config_a
-    args['ckpt_path_l'] = ckpt_path_l
-    args['ckpt_path_v'] = ckpt_path_v
-    args['ckpt_path_a'] = ckpt_path_a
 
     res_save_dir = Path(res_save_dir) / "normal"
     res_save_dir.mkdir(parents=True, exist_ok=True)
@@ -126,10 +121,7 @@ def _run(args, num_workers, is_tune):
         args,
         args['unet_config_l'],
         args['unet_config_v'],
-        args['unet_config_a'],
-        args['ckpt_path_l'],
-        args['ckpt_path_v'],
-        args['ckpt_path_a']
+        args['unet_config_a']
     )
     dataloader = MMDataLoader(args, num_workers)
     model = model.cuda()

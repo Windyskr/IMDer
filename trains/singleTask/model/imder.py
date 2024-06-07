@@ -25,7 +25,7 @@ class MSE(nn.Module):
 
 # 定义 IMDER 模型
 class IMDER(nn.Module):
-    def __init__(self, args, unet_config_l, unet_config_v, unet_config_a, ckpt_path_l, ckpt_path_v, ckpt_path_a):
+    def __init__(self, args, unet_config_l, unet_config_v, unet_config_a):
         super(IMDER, self).__init__()
         # 1. BERT 文本编码器初始化
         if args.use_bert:
@@ -62,11 +62,6 @@ class IMDER(nn.Module):
         self.ddpm_l = ddpm.DDPM(unet_config=unet_config_l, timesteps=1000)
         self.ddpm_v = ddpm.DDPM(unet_config=unet_config_v, timesteps=1000)
         self.ddpm_a = ddpm.DDPM(unet_config=unet_config_a, timesteps=1000)
-
-        # 加载预训练模型权重
-        self.ddpm_l.init_from_ckpt(ckpt_path_l)
-        self.ddpm_v.init_from_ckpt(ckpt_path_v)
-        self.ddpm_a.init_from_ckpt(ckpt_path_a)
 
         # 5. 特征拼接和重建网络
         # 模态融合和重建
